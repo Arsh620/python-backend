@@ -1,4 +1,4 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, status, Request
 from controllers.auth_controller import register, login
 
 router = APIRouter(prefix="/auth", tags=["authentication"])

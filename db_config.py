@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from models import Base
+from models import Base, User, UserActivityLog
 
 load_dotenv()
 
@@ -28,6 +28,7 @@ def init_db():
     try:
         Base.metadata.create_all(bind=engine)
         print("Database tables created successfully")
+        print("Tables: users, user_activity_logs")
     except Exception as e:
         print(f"Database connection failed: {e}")
         print("Please check your PostgreSQL server and credentials in .env file")

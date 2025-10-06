@@ -1,74 +1,115 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
-from db_config import get_db
-from services.analytics_etl import AnalyticsETL
+from data_engineering.streaming.stream_processor import stream_processor
 from dependencies import get_current_user
 from schemas import UserResponse
+from db_config import get_db
+from models.user_model import User
+import pandas as pd
+from datetime import datetime
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-@router.get("/dashboard")
-def get_dashboard_stats(
-    days: int = Query(7, description="Number of days to analyze"),
-    db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """
-    Get dashboard analytics for admin users
-    This endpoint provides key metrics for business intelligence
-    """
-    etl = AnalyticsETL(db)
-    
-    return {
-        "login_trends": etl.extract_daily_login_stats(days),
-        "security_alerts": etl.extract_security_alerts(24),
-        "api_usage": etl.extract_api_usage_stats(days),
-        "analysis_period": f"Last {days} days"
-    }
+@router.get("/batch-report")
+def get_batch_analytics(current_user: UserResponse = Depends(get_current_user), db: Session = Depends(get_db)):
+    """Get batch processed analytics (requires authentication)"""
+    try:
+        users = db.query(User).all()
+        
+        if not users:
+            return {
+                "success": True, 
+                "data": {
+                    "total_users": 0,
+                    "active_users": 0,
+                    "message": "No users found"
+                }
+            }
+        
+        total_users = len(users)
+        active_users = len([u for u in users if u.is_active])
+        users_with_names = len([u for u in users if u.full_name])
+        
+        analytics = {
+            "total_users": total_users,
+            "active_users": active_users,
+            "inactive_users": total_users - active_users,
+            "users_with_full_name": users_with_names,
+            "completion_rate": round((users_with_names / total_users) * 100, 2) if total_users > 0 else 0,
+            "processed_at": datetime.now().isoformat()
+        }
+        
+        return {"success": True, "data": analytics}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Analytics processing failed: {str(e)}")
 
-@router.get("/user-behavior/{user_id}")
-def get_user_behavior(
-    user_id: int,
-    db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """
-    Get behavior analysis for a specific user
-    This helps in user experience optimization and personalization
-    """
-    etl = AnalyticsETL(db)
-    return etl.extract_user_behavior_patterns(user_id)
+@router.get("/public-analytics")
+def get_public_analytics(db: Session = Depends(get_db)):
+    """Get analytics without authentication"""
+    try:
+        users = db.query(User).all()
+        
+        if not users:
+            return {
+                "success": True, 
+                "data": {
+                    "total_users": 0,
+                    "active_users": 0,
+                    "message": "No users found"
+                }
+            }
+        
+        total_users = len(users)
+        active_users = len([u for u in users if u.is_active])
+        users_with_names = len([u for u in users if u.full_name])
+        
+        analytics = {
+            "total_users": total_users,
+            "active_users": active_users,
+            "inactive_users": total_users - active_users,
+            "users_with_full_name": users_with_names,
+            "completion_rate": round((users_with_names / total_users) * 100, 2) if total_users > 0 else 0,
+            "processed_at": datetime.now().isoformat()
+        }
+        
+        return {"success": True, "data": analytics}
+        
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
-@router.get("/security-alerts")
-def get_security_alerts(
-    hours: int = Query(24, description="Hours to look back for alerts"),
-    db: Session = Depends(get_db)
-) -> List[Dict[str, Any]]:
-    """
-    Get security alerts for monitoring suspicious activities
-    This endpoint is used by security teams for threat detection
-    """
-    etl = AnalyticsETL(db)
-    return etl.extract_security_alerts(hours)
+@router.get("/streaming-stats")
+def get_streaming_stats(current_user: UserResponse = Depends(get_current_user)):
+    """Get real-time streaming statistics"""
+    try:
+        stats = stream_processor.get_real_time_stats()
+        return {"success": True, "data": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Streaming stats failed: {str(e)}")
 
-@router.get("/daily-report")
-def get_daily_report(
-    db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """
-    Get comprehensive daily analytics report
-    This provides executive summary of platform usage
-    """
-    etl = AnalyticsETL(db)
-    return etl.generate_daily_report()
+@router.get("/recent-events")
+def get_recent_events(limit: int = 10, current_user: UserResponse = Depends(get_current_user)):
+    """Get recent streaming events"""
+    try:
+        events = stream_processor.get_recent_events(limit)
+        return {"success": True, "data": events}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Recent events failed: {str(e)}")
 
-@router.get("/my-activity")
-def get_my_activity(
-    user_id: int = Query(..., description="User ID to get activity for"),
-    db: Session = Depends(get_db)
-) -> Dict[str, Any]:
-    """
-    Get current user's activity patterns
-    This allows users to see their own usage analytics
-    """
-    etl = AnalyticsETL(db)
-    return etl.extract_user_behavior_patterns(user_id)
+@router.get("/simple-stats")
+def get_simple_stats(db: Session = Depends(get_db)):
+    """Get simple statistics without authentication for testing"""
+    try:
+        user_count = db.query(User).count()
+        active_count = db.query(User).filter(User.is_active == True).count()
+        
+        return {
+            "success": True,
+            "data": {
+                "total_users": user_count,
+                "active_users": active_count,
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
